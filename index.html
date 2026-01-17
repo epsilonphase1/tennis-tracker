@@ -1,0 +1,661 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tennis Match Tracker</title>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    import React, { useState, useEffect } from 'react';
+import { TrendingUp, Save, BarChart3, Plus, Trash2 } from 'lucide-react';
+
+export default function TennisMatchTracker() {
+  const [matches, setMatches] = useState([]);
+  const [currentMatch, setCurrentMatch] = useState(null);
+  const [view, setView] = useState('home');
+  const [opponentName, setOpponentName] = useState('');
+  const [playerName, setPlayerName] = useState('');
+
+  useEffect(() => {
+    const loadMatches = async () => {
+      try {
+        const result = await window.storage.list('match:');
+        if (result && result.keys) {
+          const matchData = await Promise.all(
+            result.keys.map(async (key) => {
+              const data = await window.storage.get(key);
+              return data ? JSON.parse(data.value) : null;
+            })
+          );
+          setMatches(matchData.filter(m => m !== null).sort((a, b) => b.timestamp - a.timestamp));
+        }
+      } catch (error) {
+        console.log('No previous matches found');
+      }
+    };
+    loadMatches();
+  }, []);
+
+  const startNewMatch = (playerServes) => {
+    const opponent = opponentName.trim();
+    const player = playerName.trim();
+    if (!opponent || !player) return;
+    
+    const match = {
+      id: Date.now(),
+      timestamp: Date.now(),
+      opponent,
+      playerName: player,
+      serving: playerServes ? 'player' : 'opponent',
+      score: {
+        player: { sets: 0, games: [0], points: 0 },
+        opponent: { sets: 0, games: [0], points: 0 }
+      },
+      currentSet: 0,
+      stats: {
+        player: {
+          firstServesIn: 0,
+          firstServesTotal: 0,
+          secondServesIn: 0,
+          secondServesTotal: 0,
+          doubleFaults: 0,
+          aces: 0,
+          winners: 0,
+          forcedErrors: 0,
+          unforcedErrors: 0,
+          netPointsWon: 0,
+          netPointsTotal: 0,
+          breakPointsWon: 0,
+          breakPointsTotal: 0
+        }
+      },
+      gameLog: []
+    };
+    setCurrentMatch(match);
+    setOpponentName('');
+    setPlayerName('');
+    setView('track');
+  };
+
+  const getPointScore = (points) => {
+    const scores = ['0', '15', '30', '40'];
+    return points < 4 ? scores[points] : '40';
+  };
+
+  const getGameScore = () => {
+    if (!currentMatch) return '';
+    const p = currentMatch.score.player.points;
+    const o = currentMatch.score.opponent.points;
+    
+    if (p >= 3 && o >= 3) {
+      if (p === o) return 'Deuce';
+      if (p > o) return 'Ad-In';
+      return 'Ad-Out';
+    }
+    
+    return `${getPointScore(p)} - ${getPointScore(o)}`;
+  };
+
+  const isServing = () => currentMatch?.serving === 'player';
+
+  const pointWon = (winner, statType = null) => {
+    setCurrentMatch(prev => {
+      if (!prev) return prev;
+      
+      const updated = { ...prev };
+      const p = updated.score.player.points;
+      const o = updated.score.opponent.points;
+      
+      // Update stats if provided
+      if (statType && winner === 'player') {
+        updated.stats.player[statType]++;
+      }
+      
+      // Check for game point
+      if (winner === 'player') {
+        if (p >= 3 && p >= o + 1) {
+          // Player wins game
+          return winGame(updated, 'player');
+        }
+        updated.score.player.points++;
+      } else {
+        if (o >= 3 && o >= p + 1) {
+          // Opponent wins game
+          return winGame(updated, 'opponent');
+        }
+        updated.score.opponent.points++;
+      }
+      
+      return updated;
+    });
+  };
+
+  const winGame = (match, winner) => {
+    const currentSet = match.currentSet;
+    
+    // Increment games for winner
+    match.score[winner].games[currentSet]++;
+    
+    // Reset points
+    match.score.player.points = 0;
+    match.score.opponent.points = 0;
+    
+    // Switch server
+    match.serving = match.serving === 'player' ? 'opponent' : 'player';
+    
+    // Check for set win
+    const pGames = match.score.player.games[currentSet];
+    const oGames = match.score.opponent.games[currentSet];
+    
+    if ((pGames >= 6 || oGames >= 6) && Math.abs(pGames - oGames) >= 2) {
+      // Someone won the set
+      if (pGames > oGames) {
+        match.score.player.sets++;
+      } else {
+        match.score.opponent.sets++;
+      }
+      
+      // Start new set
+      match.currentSet++;
+      match.score.player.games.push(0);
+      match.score.opponent.games.push(0);
+    }
+    
+    return match;
+  };
+
+  const updateServeStats = (stat) => {
+    setCurrentMatch(prev => {
+      if (!prev) return prev;
+      
+      const updated = { ...prev };
+      const stats = updated.stats.player;
+      
+      if (stat === 'firstServeIn') {
+        stats.firstServesIn++;
+        stats.firstServesTotal++;
+      } else if (stat === 'firstServeMiss') {
+        stats.firstServesTotal++;
+        stats.secondServesTotal++;
+      } else if (stat === 'secondServeIn') {
+        stats.secondServesIn++;
+      } else if (stat === 'doubleFault') {
+        stats.doubleFaults++;
+        return pointWonDirect(updated, 'opponent');
+      } else if (stat === 'ace') {
+        stats.aces++;
+        stats.firstServesIn++;
+        stats.firstServesTotal++;
+        return pointWonDirect(updated, 'player');
+      }
+      
+      return updated;
+    });
+  };
+
+  const pointWonDirect = (match, winner) => {
+    const p = match.score.player.points;
+    const o = match.score.opponent.points;
+    
+    // Check for game point
+    if (winner === 'player') {
+      if (p >= 3 && p >= o + 1) {
+        return winGame(match, 'player');
+      }
+      match.score.player.points++;
+    } else {
+      if (o >= 3 && o >= p + 1) {
+        return winGame(match, 'opponent');
+      }
+      match.score.opponent.points++;
+    }
+    
+    return match;
+  };
+
+  const updateSpecialPoint = (type, won) => {
+    setCurrentMatch(prev => {
+      if (!prev) return prev;
+      
+      const updated = { ...prev };
+      const stats = updated.stats.player;
+      
+      if (type === 'net') {
+        stats.netPointsTotal++;
+        if (won) stats.netPointsWon++;
+      } else if (type === 'break') {
+        stats.breakPointsTotal++;
+        if (won) stats.breakPointsWon++;
+      }
+      
+      return updated;
+    });
+  };
+
+  const saveMatch = async () => {
+    try {
+      await window.storage.set(`match:${currentMatch.id}`, JSON.stringify(currentMatch));
+      setMatches(prev => [currentMatch, ...prev]);
+      setCurrentMatch(null);
+      setView('home');
+    } catch (error) {
+      console.error('Error saving match:', error);
+      alert('Failed to save match');
+    }
+  };
+
+  const deleteMatch = async (matchId) => {
+    try {
+      await window.storage.delete(`match:${matchId}`);
+      setMatches(prev => prev.filter(m => m.id !== matchId));
+    } catch (error) {
+      console.error('Error deleting match:', error);
+    }
+  };
+
+  const calculatePercentage = (made, total) => {
+    return total === 0 ? 0 : Math.round((made / total) * 100);
+  };
+
+  const getMatchScore = (match) => {
+    const sets = [];
+    for (let i = 0; i <= match.currentSet; i++) {
+      if (match.score.player.games[i] !== undefined) {
+        sets.push(`${match.score.player.games[i]}-${match.score.opponent.games[i]}`);
+      }
+    }
+    return sets.join(', ');
+  };
+
+  // Setup View - Choose who serves first
+  if (view === 'setup') {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-green-50 p-4">
+        <div className="max-w-md mx-auto">
+          <button onClick={() => setView('home')} className="mb-4 text-blue-600 font-medium">
+            ← Back
+          </button>
+          <div className="bg-white rounded-lg shadow-lg p-6">
+            <h2 className="text-2xl font-bold text-gray-800 mb-6">New Match</h2>
+            <label className="block mb-2 text-gray-700 font-medium">Your Name</label>
+            <input
+              type="text"
+              value={playerName}
+              onChange={(e) => setPlayerName(e.target.value)}
+              className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg mb-4 text-lg"
+              placeholder="Enter your name"
+              autoFocus
+            />
+            <label className="block mb-2 text-gray-700 font-medium">Opponent Name</label>
+            <input
+              type="text"
+              value={opponentName}
+              onChange={(e) => setOpponentName(e.target.value)}
+              className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg mb-6 text-lg"
+              placeholder="Enter opponent's name"
+            />
+            
+            <div className="mb-4">
+              <p className="text-gray-700 font-medium mb-3">Who serves first?</p>
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  onClick={() => startNewMatch(true)}
+                  disabled={!opponentName.trim() || !playerName.trim()}
+                  className="bg-blue-600 text-white py-4 rounded-lg font-semibold hover:bg-blue-700 disabled:bg-gray-400"
+                >
+                  {playerName.trim() || 'You'} Serve
+                </button>
+                <button
+                  onClick={() => startNewMatch(false)}
+                  disabled={!opponentName.trim() || !playerName.trim()}
+                  className="bg-green-600 text-white py-4 rounded-lg font-semibold hover:bg-green-700 disabled:bg-gray-400"
+                >
+                  {opponentName.trim() || 'Opponent'} Serves
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Tracking View
+  if (view === 'track' && currentMatch) {
+    const stats = currentMatch.stats.player;
+    const firstServePercent = calculatePercentage(stats.firstServesIn, stats.firstServesTotal);
+    const serving = isServing();
+
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-green-50 p-4 pb-20">
+        <div className="max-w-2xl mx-auto">
+          {/* Score Display */}
+          <div className="bg-white rounded-lg shadow-lg p-4 mb-4">
+            <div className="text-center mb-3">
+              <h2 className="text-lg font-bold text-gray-800">{currentMatch.playerName} vs {currentMatch.opponent}</h2>
+              <div className="text-sm text-gray-600">
+                {serving ? `🎾 ${currentMatch.playerName} Serving` : `${currentMatch.opponent} Serving`}
+              </div>
+            </div>
+            
+            {/* Sets Score */}
+            <div className="flex justify-center gap-8 mb-3">
+              <div className="text-center">
+                <div className="text-sm text-gray-600 mb-1">{currentMatch.playerName}</div>
+                <div className="text-3xl font-bold text-blue-600">
+                  {currentMatch.score.player.sets}
+                </div>
+              </div>
+              <div className="text-center">
+                <div className="text-sm text-gray-600 mb-1">{currentMatch.opponent}</div>
+                <div className="text-3xl font-bold text-gray-600">
+                  {currentMatch.score.opponent.sets}
+                </div>
+              </div>
+            </div>
+
+            {/* Games Score */}
+            <div className="text-center mb-3">
+              <div className="text-sm text-gray-600 mb-1">Current Set</div>
+              <div className="text-2xl font-bold text-gray-800">
+                {currentMatch.score.player.games[currentMatch.currentSet]} - {currentMatch.score.opponent.games[currentMatch.currentSet]}
+              </div>
+            </div>
+
+            {/* Point Score */}
+            <div className="text-center bg-blue-50 rounded-lg p-3">
+              <div className="text-2xl font-bold text-blue-600">
+                {getGameScore()}
+              </div>
+            </div>
+
+            {/* Serve Stats */}
+            <div className="grid grid-cols-2 gap-2 mt-3 text-sm text-gray-600">
+              <div>1st Serve: {firstServePercent}% ({stats.firstServesIn}/{stats.firstServesTotal})</div>
+              <div>Aces: {stats.aces} | DFs: {stats.doubleFaults}</div>
+            </div>
+          </div>
+
+          {/* Serve Buttons - Only show when player is serving */}
+          {serving && (
+            <div className="bg-white rounded-lg shadow-lg p-4 mb-4">
+              <h3 className="font-bold text-gray-700 mb-3 text-lg">{currentMatch.playerName}'s Serve</h3>
+              <div className="grid grid-cols-2 gap-2 mb-3">
+                <button
+                  onClick={() => updateServeStats('ace')}
+                  className="bg-green-500 text-white py-4 rounded-lg font-semibold text-lg hover:bg-green-600"
+                >
+                  Ace
+                </button>
+                <button
+                  onClick={() => updateServeStats('doubleFault')}
+                  className="bg-red-500 text-white py-4 rounded-lg font-semibold text-lg hover:bg-red-600"
+                >
+                  Double Fault
+                </button>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  onClick={() => updateServeStats('firstServeIn')}
+                  className="bg-blue-500 text-white py-3 rounded-lg font-medium hover:bg-blue-600"
+                >
+                  1st Serve In
+                </button>
+                <button
+                  onClick={() => updateServeStats('firstServeMiss')}
+                  className="bg-orange-500 text-white py-3 rounded-lg font-medium hover:bg-orange-600"
+                >
+                  1st Serve Miss
+                </button>
+                <button
+                  onClick={() => updateServeStats('secondServeIn')}
+                  className="bg-blue-400 text-white py-3 rounded-lg font-medium hover:bg-blue-500 col-span-2"
+                >
+                  2nd Serve In
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Point Outcome */}
+          <div className="bg-white rounded-lg shadow-lg p-4 mb-4">
+            <h3 className="font-bold text-gray-700 mb-3 text-lg">Point Outcome</h3>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={() => pointWon('player', 'winners')}
+                className="bg-green-500 text-white py-4 rounded-lg font-semibold hover:bg-green-600"
+              >
+                {currentMatch.playerName} Winner
+                <div className="text-sm font-normal">({stats.winners})</div>
+              </button>
+              <button
+                onClick={() => pointWon('player', 'forcedErrors')}
+                className="bg-blue-500 text-white py-4 rounded-lg font-semibold hover:bg-blue-600"
+              >
+                {currentMatch.opponent} Error
+                <div className="text-sm font-normal">({stats.forcedErrors})</div>
+              </button>
+              <button
+                onClick={() => pointWon('opponent')}
+                className="bg-orange-500 text-white py-4 rounded-lg font-semibold hover:bg-orange-600"
+              >
+                {currentMatch.opponent} Winner
+              </button>
+              <button
+                onClick={() => pointWon('opponent', 'unforcedErrors')}
+                className="bg-red-500 text-white py-4 rounded-lg font-semibold hover:bg-red-600"
+              >
+                {currentMatch.playerName} Error
+                <div className="text-sm font-normal">({stats.unforcedErrors})</div>
+              </button>
+            </div>
+          </div>
+
+          {/* Special Points */}
+          <div className="bg-white rounded-lg shadow-lg p-4 mb-4">
+            <h3 className="font-bold text-gray-700 mb-3">Special Points (Optional)</h3>
+            <div className="grid grid-cols-2 gap-2 mb-2">
+              <button
+                onClick={() => updateSpecialPoint('net', true)}
+                className="bg-purple-500 text-white py-2 rounded-lg text-sm hover:bg-purple-600"
+              >
+                Net Point Won
+              </button>
+              <button
+                onClick={() => updateSpecialPoint('net', false)}
+                className="bg-purple-300 text-white py-2 rounded-lg text-sm hover:bg-purple-400"
+              >
+                Net Point Lost
+              </button>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={() => updateSpecialPoint('break', true)}
+                className="bg-yellow-500 text-white py-2 rounded-lg text-sm hover:bg-yellow-600"
+              >
+                Break Point Won
+              </button>
+              <button
+                onClick={() => updateSpecialPoint('break', false)}
+                className="bg-yellow-300 text-white py-2 rounded-lg text-sm hover:bg-yellow-400"
+              >
+                Break Point Lost
+              </button>
+            </div>
+          </div>
+
+          {/* Action Buttons */}
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              onClick={() => {
+                if (confirm('Are you sure you want to abandon this match?')) {
+                  setCurrentMatch(null);
+                  setView('home');
+                }
+              }}
+              className="bg-gray-500 text-white py-3 rounded-lg font-semibold hover:bg-gray-600"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={saveMatch}
+              className="bg-green-600 text-white py-3 rounded-lg font-semibold hover:bg-green-700 flex items-center justify-center gap-2"
+            >
+              <Save size={20} />
+              Save Match
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Stats View
+  if (view === 'stats') {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-green-50 p-4">
+        <div className="max-w-2xl mx-auto">
+          <button onClick={() => setView('home')} className="mb-4 text-blue-600 font-medium">
+            ← Back
+          </button>
+          <h2 className="text-2xl font-bold text-gray-800 mb-4">Match History</h2>
+          
+          {matches.length === 0 ? (
+            <div className="bg-white rounded-lg shadow-lg p-8 text-center text-gray-500">
+              No matches recorded yet
+            </div>
+          ) : (
+            matches.map(match => {
+              const stats = match.stats.player;
+              const firstServePercent = calculatePercentage(stats.firstServesIn, stats.firstServesTotal);
+              const secondServePercent = calculatePercentage(stats.secondServesIn, stats.secondServesTotal);
+              
+              return (
+                <div key={match.id} className="bg-white rounded-lg shadow-lg p-4 mb-4">
+                  <div className="flex justify-between items-start mb-3">
+                    <div>
+                      <h3 className="text-lg font-bold text-gray-800">{match.playerName} vs {match.opponent}</h3>
+                      <p className="text-sm text-gray-500">
+                        {new Date(match.timestamp).toLocaleDateString()}
+                      </p>
+                      <p className="text-md font-semibold text-blue-600 mt-1">
+                        Sets: {match.score.player.sets} - {match.score.opponent.sets}
+                      </p>
+                      <p className="text-sm text-gray-600">
+                        Games: {getMatchScore(match)}
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => deleteMatch(match.id)}
+                      className="text-red-500 hover:text-red-700"
+                    >
+                      <Trash2 size={20} />
+                    </button>
+                  </div>
+                  
+                  <div className="grid grid-cols-2 gap-3 text-sm">
+                    <div className="bg-blue-50 p-2 rounded">
+                      <div className="font-semibold text-gray-700">1st Serve</div>
+                      <div className="text-lg font-bold text-blue-600">{firstServePercent}%</div>
+                      <div className="text-gray-600">{stats.firstServesIn}/{stats.firstServesTotal}</div>
+                    </div>
+                    
+                    <div className="bg-blue-50 p-2 rounded">
+                      <div className="font-semibold text-gray-700">2nd Serve</div>
+                      <div className="text-lg font-bold text-blue-600">{secondServePercent}%</div>
+                      <div className="text-gray-600">{stats.secondServesIn}/{stats.secondServesTotal}</div>
+                    </div>
+                    
+                    <div className="bg-green-50 p-2 rounded">
+                      <div className="font-semibold text-gray-700">Aces</div>
+                      <div className="text-lg font-bold text-green-600">{stats.aces}</div>
+                    </div>
+                    
+                    <div className="bg-red-50 p-2 rounded">
+                      <div className="font-semibold text-gray-700">Double Faults</div>
+                      <div className="text-lg font-bold text-red-600">{stats.doubleFaults}</div>
+                    </div>
+                    
+                    <div className="bg-green-50 p-2 rounded">
+                      <div className="font-semibold text-gray-700">Winners</div>
+                      <div className="text-lg font-bold text-green-600">{stats.winners}</div>
+                    </div>
+                    
+                    <div className="bg-red-50 p-2 rounded">
+                      <div className="font-semibold text-gray-700">Unforced Errors</div>
+                      <div className="text-lg font-bold text-red-600">{stats.unforcedErrors}</div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // Home View
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-green-50 p-4">
+      <div className="max-w-md mx-auto">
+        <div className="text-center mb-8 mt-8">
+          <h1 className="text-4xl font-bold text-gray-800 mb-2">Tennis Tracker</h1>
+          <p className="text-gray-600">Track match statistics</p>
+        </div>
+
+        <div className="space-y-4">
+          <button
+            onClick={() => setView('setup')}
+            className="w-full bg-blue-600 text-white py-6 rounded-lg font-semibold text-xl hover:bg-blue-700 flex items-center justify-center gap-3 shadow-lg"
+          >
+            <Plus size={28} />
+            New Match
+          </button>
+
+          <button
+            onClick={() => setView('stats')}
+            className="w-full bg-green-600 text-white py-6 rounded-lg font-semibold text-xl hover:bg-green-700 flex items-center justify-center gap-3 shadow-lg"
+          >
+            <BarChart3 size={28} />
+            View History ({matches.length})
+          </button>
+        </div>
+
+        {matches.length > 0 && (
+          <div className="mt-8 bg-white rounded-lg shadow-lg p-6">
+            <h3 className="font-bold text-gray-700 mb-3 flex items-center gap-2">
+              <TrendingUp size={20} />
+              Recent Match
+            </h3>
+            <div className="text-sm text-gray-600">
+              <div className="font-semibold text-lg text-gray-800 mb-1">
+                {matches[0].playerName} vs {matches[0].opponent}
+              </div>
+              <div className="text-xl font-bold text-blue-600 mb-1">
+                Sets: {matches[0].score.player.sets} - {matches[0].score.opponent.sets}
+              </div>
+              <div className="text-gray-600 mb-2">
+                {getMatchScore(matches[0])}
+              </div>
+              <div className="text-gray-500">
+                {new Date(matches[0].timestamp).toLocaleDateString()}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<TennisMatchTracker />);
+  </script>
+</body>
+</html>
