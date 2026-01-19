@@ -86,7 +86,8 @@
         tiebreakAt: 6,     // Tiebreak at 6-6
         tiebreakPoints: 7, // First to 7 (win by 2)
         finalSetTiebreak: true, // Use tiebreak in final set
-        finalSetTiebreakPoints: 7 // Points for final set tiebreak
+        finalSetTiebreakPoints: 7, // Points for final set tiebreak
+        noAd: false        // No-ad scoring (sudden death at deuce)
       });
 
       // Load matches from localStorage on mount
@@ -171,7 +172,10 @@
         
         // Regular game scoring
         if (p >= 3 && o >= 3) {
-          if (p === o) return 'Deuce';
+          if (p === o) {
+            // No-ad: show "Deciding Point" instead of "Deuce"
+            return currentMatch.format?.noAd ? 'Deciding Point' : 'Deuce';
+          }
           if (p > o) return 'Ad-In';
           return 'Ad-Out';
         }
@@ -312,13 +316,18 @@
         const p = match.score.player.points;
         const o = match.score.opponent.points;
         
+        // No-ad scoring: at deuce (3-3), next point wins
+        const isNoAd = match.format?.noAd;
+        
         if (winner === 'player') {
-          if (p >= 3 && p >= o + 1) {
+          // Check if this point wins the game
+          if (p >= 3 && (isNoAd ? p >= o : p >= o + 1)) {
             return winGame(match, 'player');
           }
           match.score.player.points++;
         } else {
-          if (o >= 3 && o >= p + 1) {
+          // Check if this point wins the game
+          if (o >= 3 && (isNoAd ? o >= p : o >= p + 1)) {
             return winGame(match, 'opponent');
           }
           match.score.opponent.points++;
@@ -544,7 +553,7 @@
       };
 
       const formatDescription = () => {
-        const { setsToWin, gamesPerSet, tiebreakAt, tiebreakPoints, finalSetTiebreak, finalSetTiebreakPoints } = matchFormat;
+        const { setsToWin, gamesPerSet, tiebreakAt, tiebreakPoints, finalSetTiebreak, finalSetTiebreakPoints, noAd } = matchFormat;
         const bestOf = setsToWin * 2 - 1;
         let desc = `Best of ${bestOf}`;
         if (gamesPerSet !== 6) desc += `, ${gamesPerSet} games/set`;
@@ -552,6 +561,7 @@
         if (tiebreakPoints !== 7) desc += `, TB to ${tiebreakPoints}`;
         if (!finalSetTiebreak) desc += `, no final set TB`;
         else if (finalSetTiebreakPoints !== tiebreakPoints) desc += `, final TB to ${finalSetTiebreakPoints}`;
+        if (noAd) desc += `, no-ad`;
         return desc;
       };
 
@@ -670,6 +680,20 @@
                       </select>
                     </div>
                   )}
+                  
+                  {/* No-Ad Scoring Option */}
+                  <div className="mb-3">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={matchFormat.noAd}
+                        onChange={(e) => setMatchFormat(f => ({...f, noAd: e.target.checked}))}
+                        className="w-4 h-4 text-blue-600 rounded"
+                      />
+                      <span className="text-sm text-gray-700">No-Ad scoring (sudden death at deuce)</span>
+                    </label>
+                    <p className="text-xs text-gray-500 ml-6 mt-1">Common in youth/junior tennis - receiver chooses side at deuce</p>
+                  </div>
                   
                   <div className="bg-gray-50 rounded-lg p-2 text-sm text-gray-600">
                     {formatDescription()}
