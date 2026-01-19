@@ -8,6 +8,7 @@
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </head>
 <body>
   <div id="root"></div>
@@ -55,6 +56,21 @@
         <line x1="14" y1="11" x2="14" y2="17"></line>
       </svg>
     );
+    
+    const Settings = ({ size = 20 }) => (
+      <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <circle cx="12" cy="12" r="3"></circle>
+        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+      </svg>
+    );
+    
+    const Download = ({ size = 20 }) => (
+      <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+        <polyline points="7 10 12 15 17 10"></polyline>
+        <line x1="12" y1="15" x2="12" y2="3"></line>
+      </svg>
+    );
 
     function TennisMatchTracker() {
       const [matches, setMatches] = useState([]);
@@ -62,11 +78,21 @@
       const [view, setView] = useState('home');
       const [opponentName, setOpponentName] = useState('');
       const [playerName, setPlayerName] = useState('');
+      
+      // Match format settings
+      const [matchFormat, setMatchFormat] = useState({
+        setsToWin: 2,      // Best of 3 = 2 sets to win
+        gamesPerSet: 6,    // Standard 6 games
+        tiebreakAt: 6,     // Tiebreak at 6-6
+        tiebreakPoints: 7, // First to 7 (win by 2)
+        finalSetTiebreak: true, // Use tiebreak in final set
+        finalSetTiebreakPoints: 7 // Points for final set tiebreak
+      });
 
       // Load matches from localStorage on mount
       useEffect(() => {
         try {
-          const savedMatches = localStorage.getItem('tennis_matches');
+          const savedMatches = localStorage.getItem('tennis_matches_v2');
           if (savedMatches) {
             setMatches(JSON.parse(savedMatches));
           }
@@ -78,9 +104,25 @@
       // Save matches to localStorage whenever they change
       useEffect(() => {
         if (matches.length > 0) {
-          localStorage.setItem('tennis_matches', JSON.stringify(matches));
+          localStorage.setItem('tennis_matches_v2', JSON.stringify(matches));
         }
       }, [matches]);
+
+      const createEmptyStats = () => ({
+        firstServesIn: 0,
+        firstServesTotal: 0,
+        secondServesIn: 0,
+        secondServesTotal: 0,
+        doubleFaults: 0,
+        aces: 0,
+        winners: 0,
+        forcedErrors: 0,
+        unforcedErrors: 0,
+        netPointsWon: 0,
+        netPointsTotal: 0,
+        breakPointsWon: 0,
+        breakPointsTotal: 0
+      });
 
       const startNewMatch = (playerServes) => {
         const opponent = opponentName.trim();
@@ -93,27 +135,17 @@
           opponent,
           playerName: player,
           serving: playerServes ? 'player' : 'opponent',
+          format: { ...matchFormat },
           score: {
             player: { sets: 0, games: [0], points: 0 },
             opponent: { sets: 0, games: [0], points: 0 }
           },
           currentSet: 0,
+          isTiebreak: false,
+          matchComplete: false,
           stats: {
-            player: {
-              firstServesIn: 0,
-              firstServesTotal: 0,
-              secondServesIn: 0,
-              secondServesTotal: 0,
-              doubleFaults: 0,
-              aces: 0,
-              winners: 0,
-              forcedErrors: 0,
-              unforcedErrors: 0,
-              netPointsWon: 0,
-              netPointsTotal: 0,
-              breakPointsWon: 0,
-              breakPointsTotal: 0
-            }
+            player: createEmptyStats(),
+            opponent: createEmptyStats()
           }
         };
         setCurrentMatch(match);
@@ -132,6 +164,12 @@
         const p = currentMatch.score.player.points;
         const o = currentMatch.score.opponent.points;
         
+        // Tiebreak scoring
+        if (currentMatch.isTiebreak) {
+          return `${p} - ${o}`;
+        }
+        
+        // Regular game scoring
         if (p >= 3 && o >= 3) {
           if (p === o) return 'Deuce';
           if (p > o) return 'Ad-In';
@@ -142,31 +180,135 @@
       };
 
       const isServing = () => currentMatch?.serving === 'player';
+      const getCurrentServer = () => currentMatch?.serving || 'player';
+
+      const checkSetWon = (match) => {
+        const currentSet = match.currentSet;
+        const pGames = match.score.player.games[currentSet];
+        const oGames = match.score.opponent.games[currentSet];
+        const { gamesPerSet, tiebreakAt } = match.format;
+        
+        // Check if tiebreak was just won
+        if (match.isTiebreak) {
+          return null; // Tiebreak win is handled separately
+        }
+        
+        // Standard set win: reach gamesPerSet with 2 game lead
+        if (pGames >= gamesPerSet && pGames - oGames >= 2) return 'player';
+        if (oGames >= gamesPerSet && oGames - pGames >= 2) return 'opponent';
+        
+        return null;
+      };
+
+      const shouldStartTiebreak = (match) => {
+        const currentSet = match.currentSet;
+        const pGames = match.score.player.games[currentSet];
+        const oGames = match.score.opponent.games[currentSet];
+        const { tiebreakAt, setsToWin, finalSetTiebreak } = match.format;
+        
+        // Check if this is the final set
+        const isFinalSet = match.score.player.sets === setsToWin - 1 && 
+                          match.score.opponent.sets === setsToWin - 1;
+        
+        // If final set and no tiebreak allowed, don't start tiebreak
+        if (isFinalSet && !finalSetTiebreak) return false;
+        
+        // Start tiebreak when both players reach tiebreakAt games
+        return pGames === tiebreakAt && oGames === tiebreakAt;
+      };
 
       const winGame = (match, winner) => {
         const currentSet = match.currentSet;
         match.score[winner].games[currentSet]++;
         match.score.player.points = 0;
         match.score.opponent.points = 0;
-        match.serving = match.serving === 'player' ? 'opponent' : 'player';
         
-        const pGames = match.score.player.games[currentSet];
-        const oGames = match.score.opponent.games[currentSet];
+        // Switch server (unless about to start tiebreak - handled separately)
+        if (!shouldStartTiebreak(match)) {
+          match.serving = match.serving === 'player' ? 'opponent' : 'player';
+        }
         
-        if ((pGames >= 6 || oGames >= 6) && Math.abs(pGames - oGames) >= 2) {
-          if (pGames > oGames) {
-            match.score.player.sets++;
-          } else {
-            match.score.opponent.sets++;
+        // Check for tiebreak
+        if (shouldStartTiebreak(match)) {
+          match.isTiebreak = true;
+          match.tiebreakPointsPlayed = 0;
+          // Server stays the same for first point of tiebreak
+          return match;
+        }
+        
+        // Check for set win
+        const setWinner = checkSetWon(match);
+        if (setWinner) {
+          match.score[setWinner].sets++;
+          
+          // Check for match win
+          if (match.score[setWinner].sets >= match.format.setsToWin) {
+            match.matchComplete = true;
+            return match;
           }
+          
           match.currentSet++;
           match.score.player.games.push(0);
           match.score.opponent.games.push(0);
         }
+        
+        return match;
+      };
+
+      const winTiebreak = (match, winner) => {
+        const currentSet = match.currentSet;
+        match.score[winner].games[currentSet]++;
+        match.score[winner].sets++;
+        match.score.player.points = 0;
+        match.score.opponent.points = 0;
+        match.isTiebreak = false;
+        
+        // Check for match win
+        if (match.score[winner].sets >= match.format.setsToWin) {
+          match.matchComplete = true;
+          return match;
+        }
+        
+        // Start new set - loser of tiebreak serves first
+        match.currentSet++;
+        match.score.player.games.push(0);
+        match.score.opponent.games.push(0);
+        match.serving = winner === 'player' ? 'opponent' : 'player';
+        
         return match;
       };
 
       const pointWonDirect = (match, winner) => {
+        if (match.isTiebreak) {
+          // Tiebreak scoring
+          match.score[winner].points++;
+          match.tiebreakPointsPlayed = (match.tiebreakPointsPlayed || 0) + 1;
+          
+          const p = match.score.player.points;
+          const o = match.score.opponent.points;
+          
+          // Determine tiebreak target
+          const isFinalSet = match.score.player.sets === match.format.setsToWin - 1 && 
+                            match.score.opponent.sets === match.format.setsToWin - 1;
+          const target = isFinalSet ? match.format.finalSetTiebreakPoints : match.format.tiebreakPoints;
+          
+          // Check for tiebreak win (reach target with 2 point lead)
+          if (p >= target && p - o >= 2) {
+            return winTiebreak(match, 'player');
+          }
+          if (o >= target && o - p >= 2) {
+            return winTiebreak(match, 'opponent');
+          }
+          
+          // Change server every 2 points (after first point)
+          if (match.tiebreakPointsPlayed % 2 === 1) {
+            match.serving = match.serving === 'player' ? 'opponent' : 'player';
+          }
+          
+          return match;
+        }
+        
+        // Regular game scoring
         const p = match.score.player.points;
         const o = match.score.opponent.points;
         
@@ -186,35 +328,24 @@
 
       const pointWon = (winner, statType = null) => {
         setCurrentMatch(prev => {
-          if (!prev) return prev;
+          if (!prev || prev.matchComplete) return prev;
           const updated = JSON.parse(JSON.stringify(prev));
-          const p = updated.score.player.points;
-          const o = updated.score.opponent.points;
           
-          if (statType && winner === 'player') {
-            updated.stats.player[statType]++;
+          // Track stat for the appropriate player
+          if (statType) {
+            updated.stats[winner][statType]++;
           }
           
-          if (winner === 'player') {
-            if (p >= 3 && p >= o + 1) {
-              return winGame(updated, 'player');
-            }
-            updated.score.player.points++;
-          } else {
-            if (o >= 3 && o >= p + 1) {
-              return winGame(updated, 'opponent');
-            }
-            updated.score.opponent.points++;
-          }
-          return updated;
+          return pointWonDirect(updated, winner);
         });
       };
 
       const updateServeStats = (stat) => {
         setCurrentMatch(prev => {
-          if (!prev) return prev;
+          if (!prev || prev.matchComplete) return prev;
           const updated = JSON.parse(JSON.stringify(prev));
-          const stats = updated.stats.player;
+          const server = getCurrentServer();
+          const stats = updated.stats[server];
           
           if (stat === 'firstServeIn') {
             stats.firstServesIn++;
@@ -226,12 +357,15 @@
             stats.secondServesIn++;
           } else if (stat === 'doubleFault') {
             stats.doubleFaults++;
-            return pointWonDirect(updated, 'opponent');
+            // Point goes to receiver
+            const receiver = server === 'player' ? 'opponent' : 'player';
+            return pointWonDirect(updated, receiver);
           } else if (stat === 'ace') {
             stats.aces++;
             stats.firstServesIn++;
             stats.firstServesTotal++;
-            return pointWonDirect(updated, 'player');
+            // Point goes to server
+            return pointWonDirect(updated, server);
           }
           return updated;
         });
@@ -267,7 +401,7 @@
         setMatches(prev => {
           const updated = prev.filter(m => m.id !== matchId);
           if (updated.length === 0) {
-            localStorage.removeItem('tennis_matches');
+            localStorage.removeItem('tennis_matches_v2');
           }
           return updated;
         });
@@ -275,6 +409,128 @@
 
       const calculatePercentage = (made, total) => {
         return total === 0 ? 0 : Math.round((made / total) * 100);
+      };
+
+      const exportToExcel = (match) => {
+        const pStats = match.stats.player;
+        const oStats = match.stats?.opponent || createEmptyStats();
+        
+        // Create workbook
+        const wb = XLSX.utils.book_new();
+        
+        // Match Summary Sheet
+        const summaryData = [
+          ['Tennis Match Statistics'],
+          [],
+          ['Match Details'],
+          ['Date', new Date(match.timestamp).toLocaleDateString()],
+          ['Player', match.playerName],
+          ['Opponent', match.opponent],
+          ['Format', match.format ? `Best of ${match.format.setsToWin * 2 - 1}` : 'N/A'],
+          [],
+          ['Final Score'],
+          ['', match.playerName, match.opponent],
+          ['Sets', match.score.player.sets, match.score.opponent.sets],
+          ['Games by Set'],
+        ];
+        
+        // Add games for each set
+        for (let i = 0; i < match.score.player.games.length; i++) {
+          summaryData.push([`Set ${i + 1}`, match.score.player.games[i], match.score.opponent.games[i]]);
+        }
+        
+        const summarySheet = XLSX.utils.aoa_to_sheet(summaryData);
+        
+        // Set column widths
+        summarySheet['!cols'] = [{ wch: 15 }, { wch: 15 }, { wch: 15 }];
+        
+        XLSX.utils.book_append_sheet(wb, summarySheet, 'Match Summary');
+        
+        // Player Stats Sheet
+        const playerStatsData = [
+          [`${match.playerName} Statistics`],
+          [],
+          ['Serve Statistics'],
+          ['1st Serve In', pStats.firstServesIn],
+          ['1st Serve Total', pStats.firstServesTotal],
+          ['1st Serve %', pStats.firstServesTotal > 0 ? `${calculatePercentage(pStats.firstServesIn, pStats.firstServesTotal)}%` : 'N/A'],
+          ['2nd Serve In', pStats.secondServesIn],
+          ['2nd Serve Total', pStats.secondServesTotal],
+          ['2nd Serve %', pStats.secondServesTotal > 0 ? `${calculatePercentage(pStats.secondServesIn, pStats.secondServesTotal)}%` : 'N/A'],
+          ['Aces', pStats.aces],
+          ['Double Faults', pStats.doubleFaults],
+          [],
+          ['Point Statistics'],
+          ['Winners', pStats.winners],
+          ['Forced Errors (by opponent)', pStats.forcedErrors],
+          ['Unforced Errors', pStats.unforcedErrors],
+          [],
+          ['Net Play'],
+          ['Net Points Won', pStats.netPointsWon],
+          ['Net Points Total', pStats.netPointsTotal],
+          ['Net Points %', pStats.netPointsTotal > 0 ? `${calculatePercentage(pStats.netPointsWon, pStats.netPointsTotal)}%` : 'N/A'],
+          [],
+          ['Break Points'],
+          ['Break Points Won', pStats.breakPointsWon],
+          ['Break Points Total', pStats.breakPointsTotal],
+          ['Break Points %', pStats.breakPointsTotal > 0 ? `${calculatePercentage(pStats.breakPointsWon, pStats.breakPointsTotal)}%` : 'N/A'],
+        ];
+        
+        const playerSheet = XLSX.utils.aoa_to_sheet(playerStatsData);
+        playerSheet['!cols'] = [{ wch: 25 }, { wch: 15 }];
+        XLSX.utils.book_append_sheet(wb, playerSheet, match.playerName);
+        
+        // Opponent Stats Sheet
+        const opponentStatsData = [
+          [`${match.opponent} Statistics`],
+          [],
+          ['Serve Statistics'],
+          ['1st Serve In', oStats.firstServesIn],
+          ['1st Serve Total', oStats.firstServesTotal],
+          ['1st Serve %', oStats.firstServesTotal > 0 ? `${calculatePercentage(oStats.firstServesIn, oStats.firstServesTotal)}%` : 'N/A'],
+          ['2nd Serve In', oStats.secondServesIn],
+          ['2nd Serve Total', oStats.secondServesTotal],
+          ['2nd Serve %', oStats.secondServesTotal > 0 ? `${calculatePercentage(oStats.secondServesIn, oStats.secondServesTotal)}%` : 'N/A'],
+          ['Aces', oStats.aces],
+          ['Double Faults', oStats.doubleFaults],
+          [],
+          ['Point Statistics'],
+          ['Winners', oStats.winners],
+          ['Forced Errors (by opponent)', oStats.forcedErrors],
+        ];
+        
+        const opponentSheet = XLSX.utils.aoa_to_sheet(opponentStatsData);
+        opponentSheet['!cols'] = [{ wch: 25 }, { wch: 15 }];
+        XLSX.utils.book_append_sheet(wb, opponentSheet, match.opponent);
+        
+        // Comparison Sheet
+        const comparisonData = [
+          ['Head-to-Head Comparison'],
+          [],
+          ['Statistic', match.playerName, match.opponent],
+          ['1st Serve %', 
+            pStats.firstServesTotal > 0 ? `${calculatePercentage(pStats.firstServesIn, pStats.firstServesTotal)}%` : 'N/A',
+            oStats.firstServesTotal > 0 ? `${calculatePercentage(oStats.firstServesIn, oStats.firstServesTotal)}%` : 'N/A'
+          ],
+          ['2nd Serve %', 
+            pStats.secondServesTotal > 0 ? `${calculatePercentage(pStats.secondServesIn, pStats.secondServesTotal)}%` : 'N/A',
+            oStats.secondServesTotal > 0 ? `${calculatePercentage(oStats.secondServesIn, oStats.secondServesTotal)}%` : 'N/A'
+          ],
+          ['Aces', pStats.aces, oStats.aces],
+          ['Double Faults', pStats.doubleFaults, oStats.doubleFaults],
+          ['Winners', pStats.winners, oStats.winners],
+          ['Unforced Errors', pStats.unforcedErrors, oStats.unforcedErrors || 0],
+        ];
+        
+        const comparisonSheet = XLSX.utils.aoa_to_sheet(comparisonData);
+        comparisonSheet['!cols'] = [{ wch: 20 }, { wch: 15 }, { wch: 15 }];
+        XLSX.utils.book_append_sheet(wb, comparisonSheet, 'Comparison');
+        
+        // Generate filename and download
+        const dateStr = new Date(match.timestamp).toISOString().split('T')[0];
+        const filename = `tennis_${match.playerName}_vs_${match.opponent}_${dateStr}.xlsx`;
+        
+        XLSX.writeFile(wb, filename);
       };
 
       const getMatchScore = (match) => {
@@ -287,6 +543,19 @@
         return sets.join(', ');
       };
 
+      const formatDescription = () => {
+        const { setsToWin, gamesPerSet, tiebreakAt, tiebreakPoints, finalSetTiebreak, finalSetTiebreakPoints } = matchFormat;
+        const bestOf = setsToWin * 2 - 1;
+        let desc = `Best of ${bestOf}`;
+        if (gamesPerSet !== 6) desc += `, ${gamesPerSet} games/set`;
+        if (tiebreakAt !== 6) desc += `, TB at ${tiebreakAt}-${tiebreakAt}`;
+        if (tiebreakPoints !== 7) desc += `, TB to ${tiebreakPoints}`;
+        if (!finalSetTiebreak) desc += `, no final set TB`;
+        else if (finalSetTiebreakPoints !== tiebreakPoints) desc += `, final TB to ${finalSetTiebreakPoints}`;
+        return desc;
+      };
+
+      // Setup view with format settings
       if (view === 'setup') {
         return (
           <div className="min-h-screen bg-gradient-to-br from-blue-50 to-green-50 p-4">
@@ -296,6 +565,7 @@
               </button>
               <div className="bg-white rounded-lg shadow-lg p-6">
                 <h2 className="text-2xl font-bold text-gray-800 mb-6">New Match</h2>
+                
                 <label className="block mb-2 text-gray-700 font-medium">Your Name</label>
                 <input
                   type="text"
@@ -304,15 +574,109 @@
                   className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg mb-4 text-lg"
                   placeholder="Enter your name"
                 />
+                
                 <label className="block mb-2 text-gray-700 font-medium">Opponent Name</label>
                 <input
                   type="text"
                   value={opponentName}
                   onChange={(e) => setOpponentName(e.target.value)}
-                  className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg mb-6 text-lg"
+                  className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg mb-4 text-lg"
                   placeholder="Enter opponent's name"
                 />
-                <div className="mb-4">
+                
+                {/* Match Format Settings */}
+                <div className="border-t pt-4 mt-2">
+                  <h3 className="font-semibold text-gray-700 mb-3 flex items-center gap-2">
+                    <Settings size={18} /> Match Format
+                  </h3>
+                  
+                  <div className="grid grid-cols-2 gap-3 mb-3">
+                    <div>
+                      <label className="block text-sm text-gray-600 mb-1">Match Length</label>
+                      <select 
+                        value={matchFormat.setsToWin}
+                        onChange={(e) => setMatchFormat(f => ({...f, setsToWin: parseInt(e.target.value)}))}
+                        className="w-full px-3 py-2 border rounded-lg"
+                      >
+                        <option value={1}>Best of 1</option>
+                        <option value={2}>Best of 3</option>
+                        <option value={3}>Best of 5</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm text-gray-600 mb-1">Games per Set</label>
+                      <select 
+                        value={matchFormat.gamesPerSet}
+                        onChange={(e) => {
+                          const val = parseInt(e.target.value);
+                          setMatchFormat(f => ({...f, gamesPerSet: val, tiebreakAt: val}));
+                        }}
+                        className="w-full px-3 py-2 border rounded-lg"
+                      >
+                        <option value={4}>4 games</option>
+                        <option value={6}>6 games</option>
+                        <option value={8}>8 games (pro set)</option>
+                      </select>
+                    </div>
+                  </div>
+                  
+                  <div className="grid grid-cols-2 gap-3 mb-3">
+                    <div>
+                      <label className="block text-sm text-gray-600 mb-1">Tiebreak At</label>
+                      <select 
+                        value={matchFormat.tiebreakAt}
+                        onChange={(e) => setMatchFormat(f => ({...f, tiebreakAt: parseInt(e.target.value)}))}
+                        className="w-full px-3 py-2 border rounded-lg"
+                      >
+                        <option value={matchFormat.gamesPerSet}>{matchFormat.gamesPerSet}-{matchFormat.gamesPerSet}</option>
+                        <option value={99}>No tiebreak (win by 2)</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm text-gray-600 mb-1">Tiebreak Points</label>
+                      <select 
+                        value={matchFormat.tiebreakPoints}
+                        onChange={(e) => setMatchFormat(f => ({...f, tiebreakPoints: parseInt(e.target.value)}))}
+                        className="w-full px-3 py-2 border rounded-lg"
+                      >
+                        <option value={7}>First to 7</option>
+                        <option value={10}>First to 10 (super TB)</option>
+                      </select>
+                    </div>
+                  </div>
+                  
+                  {matchFormat.setsToWin > 1 && (
+                    <div className="mb-3">
+                      <label className="block text-sm text-gray-600 mb-1">Final Set</label>
+                      <select 
+                        value={matchFormat.finalSetTiebreak ? 
+                          (matchFormat.finalSetTiebreakPoints === 10 ? 'super' : 'regular') : 
+                          'none'}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          if (val === 'none') {
+                            setMatchFormat(f => ({...f, finalSetTiebreak: false}));
+                          } else if (val === 'super') {
+                            setMatchFormat(f => ({...f, finalSetTiebreak: true, finalSetTiebreakPoints: 10}));
+                          } else {
+                            setMatchFormat(f => ({...f, finalSetTiebreak: true, finalSetTiebreakPoints: 7}));
+                          }
+                        }}
+                        className="w-full px-3 py-2 border rounded-lg"
+                      >
+                        <option value="regular">Regular tiebreak at {matchFormat.tiebreakAt}-{matchFormat.tiebreakAt}</option>
+                        <option value="super">Super tiebreak (first to 10)</option>
+                        <option value="none">No tiebreak (advantage set)</option>
+                      </select>
+                    </div>
+                  )}
+                  
+                  <div className="bg-gray-50 rounded-lg p-2 text-sm text-gray-600">
+                    {formatDescription()}
+                  </div>
+                </div>
+                
+                <div className="mt-4">
                   <p className="text-gray-700 font-medium mb-3">Who serves first?</p>
                   <div className="grid grid-cols-2 gap-3">
                     <button
@@ -338,18 +702,36 @@
       }
 
       if (view === 'track' && currentMatch) {
-        const stats = currentMatch.stats.player;
-        const firstServePercent = calculatePercentage(stats.firstServesIn, stats.firstServesTotal);
+        const playerStats = currentMatch.stats.player;
+        const opponentStats = currentMatch.stats.opponent;
         const serving = isServing();
+        const currentServerName = serving ? currentMatch.playerName : currentMatch.opponent;
+        const currentStats = serving ? playerStats : opponentStats;
+        const firstServePercent = calculatePercentage(currentStats.firstServesIn, currentStats.firstServesTotal);
 
         return (
           <div className="min-h-screen bg-gradient-to-br from-blue-50 to-green-50 p-4 pb-20">
             <div className="max-w-2xl mx-auto">
+              {/* Match Complete Banner */}
+              {currentMatch.matchComplete && (
+                <div className="bg-green-500 text-white rounded-lg p-4 mb-4 text-center">
+                  <div className="text-xl font-bold">Match Complete!</div>
+                  <div className="text-lg">
+                    {currentMatch.score.player.sets > currentMatch.score.opponent.sets 
+                      ? `${currentMatch.playerName} wins!` 
+                      : `${currentMatch.opponent} wins!`}
+                  </div>
+                </div>
+              )}
+              
               <div className="bg-white rounded-lg shadow-lg p-4 mb-4">
                 <div className="text-center mb-3">
                   <h2 className="text-lg font-bold text-gray-800">{currentMatch.playerName} vs {currentMatch.opponent}</h2>
                   <div className="text-sm text-gray-600">
-                    {serving ? `🎾 ${currentMatch.playerName} Serving` : `${currentMatch.opponent} Serving`}
+                    {currentMatch.isTiebreak ? '🎾 Tiebreak - ' : '🎾 '}{currentServerName} Serving
+                  </div>
+                  <div className="text-xs text-gray-400 mt-1">
+                    {currentMatch.format && `Best of ${currentMatch.format.setsToWin * 2 - 1}`}
                   </div>
                 </div>
                 <div className="flex justify-center gap-8 mb-3">
@@ -363,7 +745,9 @@
                   </div>
                 </div>
                 <div className="text-center mb-3">
-                  <div className="text-sm text-gray-600 mb-1">Current Set</div>
+                  <div className="text-sm text-gray-600 mb-1">
+                    {currentMatch.isTiebreak ? 'Tiebreak' : 'Current Set'}
+                  </div>
                   <div className="text-2xl font-bold text-gray-800">
                     {currentMatch.score.player.games[currentMatch.currentSet]} - {currentMatch.score.opponent.games[currentMatch.currentSet]}
                   </div>
@@ -372,14 +756,15 @@
                   <div className="text-2xl font-bold text-blue-600">{getGameScore()}</div>
                 </div>
                 <div className="grid grid-cols-2 gap-2 mt-3 text-sm text-gray-600">
-                  <div>1st Serve: {firstServePercent}% ({stats.firstServesIn}/{stats.firstServesTotal})</div>
-                  <div>Aces: {stats.aces} | DFs: {stats.doubleFaults}</div>
+                  <div>{currentServerName}'s 1st: {firstServePercent}%</div>
+                  <div>Aces: {currentStats.aces} | DFs: {currentStats.doubleFaults}</div>
                 </div>
               </div>
 
-              {serving && (
+              {/* Serve Stats - shows for current server */}
+              {!currentMatch.matchComplete && (
                 <div className="bg-white rounded-lg shadow-lg p-4 mb-4">
-                  <h3 className="font-bold text-gray-700 mb-3 text-lg">{currentMatch.playerName}'s Serve</h3>
+                  <h3 className="font-bold text-gray-700 mb-3 text-lg">{currentServerName}'s Serve</h3>
                   <div className="grid grid-cols-2 gap-2 mb-3">
                     <button onClick={() => updateServeStats('ace')} className="bg-green-500 text-white py-4 rounded-lg font-semibold text-lg hover:bg-green-600">Ace</button>
                     <button onClick={() => updateServeStats('doubleFault')} className="bg-red-500 text-white py-4 rounded-lg font-semibold text-lg hover:bg-red-600">Double Fault</button>
@@ -392,39 +777,48 @@
                 </div>
               )}
 
-              <div className="bg-white rounded-lg shadow-lg p-4 mb-4">
-                <h3 className="font-bold text-gray-700 mb-3 text-lg">Point Outcome</h3>
-                <div className="grid grid-cols-2 gap-2">
-                  <button onClick={() => pointWon('player', 'winners')} className="bg-green-500 text-white py-4 rounded-lg font-semibold hover:bg-green-600">
-                    {currentMatch.playerName} Winner
-                    <div className="text-sm font-normal">({stats.winners})</div>
-                  </button>
-                  <button onClick={() => pointWon('player', 'forcedErrors')} className="bg-blue-500 text-white py-4 rounded-lg font-semibold hover:bg-blue-600">
-                    {currentMatch.opponent} Error
-                    <div className="text-sm font-normal">({stats.forcedErrors})</div>
-                  </button>
-                  <button onClick={() => pointWon('opponent')} className="bg-orange-500 text-white py-4 rounded-lg font-semibold hover:bg-orange-600">{currentMatch.opponent} Winner</button>
-                  <button onClick={() => pointWon('opponent', 'unforcedErrors')} className="bg-red-500 text-white py-4 rounded-lg font-semibold hover:bg-red-600">
-                    {currentMatch.playerName} Error
-                    <div className="text-sm font-normal">({stats.unforcedErrors})</div>
-                  </button>
+              {!currentMatch.matchComplete && (
+                <div className="bg-white rounded-lg shadow-lg p-4 mb-4">
+                  <h3 className="font-bold text-gray-700 mb-3 text-lg">Point Outcome</h3>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button onClick={() => pointWon('player', 'winners')} className="bg-green-500 text-white py-4 rounded-lg font-semibold hover:bg-green-600">
+                      {currentMatch.playerName} Winner
+                      <div className="text-sm font-normal">({playerStats.winners})</div>
+                    </button>
+                    <button onClick={() => pointWon('player', 'forcedErrors')} className="bg-blue-500 text-white py-4 rounded-lg font-semibold hover:bg-blue-600">
+                      {currentMatch.opponent} Error
+                      <div className="text-sm font-normal">(forced: {playerStats.forcedErrors})</div>
+                    </button>
+                    <button onClick={() => pointWon('opponent', 'winners')} className="bg-orange-500 text-white py-4 rounded-lg font-semibold hover:bg-orange-600">
+                      {currentMatch.opponent} Winner
+                      <div className="text-sm font-normal">({opponentStats.winners})</div>
+                    </button>
+                    <button onClick={() => pointWon('opponent', 'forcedErrors')} className="bg-red-500 text-white py-4 rounded-lg font-semibold hover:bg-red-600">
+                      {currentMatch.playerName} Error
+                      <div className="text-sm font-normal">(UE: {playerStats.unforcedErrors})</div>
+                    </button>
+                  </div>
                 </div>
-              </div>
+              )}
 
-              <div className="bg-white rounded-lg shadow-lg p-4 mb-4">
-                <h3 className="font-bold text-gray-700 mb-3">Special Points (Optional)</h3>
-                <div className="grid grid-cols-2 gap-2 mb-2">
-                  <button onClick={() => updateSpecialPoint('net', true)} className="bg-purple-500 text-white py-2 rounded-lg text-sm hover:bg-purple-600">Net Point Won</button>
-                  <button onClick={() => updateSpecialPoint('net', false)} className="bg-purple-300 text-white py-2 rounded-lg text-sm hover:bg-purple-400">Net Point Lost</button>
+              {!currentMatch.matchComplete && (
+                <div className="bg-white rounded-lg shadow-lg p-4 mb-4">
+                  <h3 className="font-bold text-gray-700 mb-3">Special Points (Optional)</h3>
+                  <div className="grid grid-cols-2 gap-2 mb-2">
+                    <button onClick={() => updateSpecialPoint('net', true)} className="bg-purple-500 text-white py-2 rounded-lg text-sm hover:bg-purple-600">Net Point Won</button>
+                    <button onClick={() => updateSpecialPoint('net', false)} className="bg-purple-300 text-white py-2 rounded-lg text-sm hover:bg-purple-400">Net Point Lost</button>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button onClick={() => updateSpecialPoint('break', true)} className="bg-yellow-500 text-white py-2 rounded-lg text-sm hover:bg-yellow-600">Break Point Won</button>
+                    <button onClick={() => updateSpecialPoint('break', false)} className="bg-yellow-300 text-white py-2 rounded-lg text-sm hover:bg-yellow-400">Break Point Lost</button>
+                  </div>
                 </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <button onClick={() => updateSpecialPoint('break', true)} className="bg-yellow-500 text-white py-2 rounded-lg text-sm hover:bg-yellow-600">Break Point Won</button>
-                  <button onClick={() => updateSpecialPoint('break', false)} className="bg-yellow-300 text-white py-2 rounded-lg text-sm hover:bg-yellow-400">Break Point Lost</button>
-                </div>
-              </div>
+              )}
 
               <div className="grid grid-cols-2 gap-2">
-                <button onClick={() => { if (confirm('Abandon match?')) { setCurrentMatch(null); setView('home'); }}} className="bg-gray-500 text-white py-3 rounded-lg font-semibold hover:bg-gray-600">Cancel</button>
+                <button onClick={() => { if (confirm('Abandon match?')) { setCurrentMatch(null); setView('home'); }}} className="bg-gray-500 text-white py-3 rounded-lg font-semibold hover:bg-gray-600">
+                  {currentMatch.matchComplete ? 'Discard' : 'Cancel'}
+                </button>
                 <button onClick={saveMatch} className="bg-green-600 text-white py-3 rounded-lg font-semibold hover:bg-green-700 flex items-center justify-center gap-2">
                   <Save />Save Match
                 </button>
@@ -444,9 +838,10 @@
                 <div className="bg-white rounded-lg shadow-lg p-8 text-center text-gray-500">No matches recorded yet</div>
               ) : (
                 matches.map(match => {
-                  const stats = match.stats.player;
-                  const firstServePercent = calculatePercentage(stats.firstServesIn, stats.firstServesTotal);
-                  const secondServePercent = calculatePercentage(stats.secondServesIn, stats.secondServesTotal);
+                  const pStats = match.stats.player;
+                  const oStats = match.stats?.opponent || createEmptyStats();
+                  const pFirstServe = calculatePercentage(pStats.firstServesIn, pStats.firstServesTotal);
+                  const oFirstServe = calculatePercentage(oStats.firstServesIn, oStats.firstServesTotal);
                   return (
                     <div key={match.id} className="bg-white rounded-lg shadow-lg p-4 mb-4">
                       <div className="flex justify-between items-start mb-3">
@@ -455,37 +850,67 @@
                           <p className="text-sm text-gray-500">{new Date(match.timestamp).toLocaleDateString()}</p>
                           <p className="text-md font-semibold text-blue-600 mt-1">Sets: {match.score.player.sets} - {match.score.opponent.sets}</p>
                           <p className="text-sm text-gray-600">Games: {getMatchScore(match)}</p>
+                          {match.format && (
+                            <p className="text-xs text-gray-400">Best of {match.format.setsToWin * 2 - 1}</p>
+                          )}
                         </div>
-                        <button onClick={() => deleteMatch(match.id)} className="text-red-500 hover:text-red-700">
-                          <Trash2 />
-                        </button>
+                        <div className="flex gap-2">
+                          <button onClick={() => exportToExcel(match)} className="text-green-600 hover:text-green-700 p-1" title="Export to Excel">
+                            <Download />
+                          </button>
+                          <button onClick={() => deleteMatch(match.id)} className="text-red-500 hover:text-red-700 p-1" title="Delete match">
+                            <Trash2 />
+                          </button>
+                        </div>
                       </div>
-                      <div className="grid grid-cols-2 gap-3 text-sm">
-                        <div className="bg-blue-50 p-2 rounded">
-                          <div className="font-semibold text-gray-700">1st Serve</div>
-                          <div className="text-lg font-bold text-blue-600">{firstServePercent}%</div>
-                          <div className="text-gray-600">{stats.firstServesIn}/{stats.firstServesTotal}</div>
+                      
+                      {/* Player Stats */}
+                      <div className="mb-3">
+                        <div className="font-semibold text-gray-700 mb-2">{match.playerName}'s Stats</div>
+                        <div className="grid grid-cols-3 gap-2 text-sm">
+                          <div className="bg-blue-50 p-2 rounded">
+                            <div className="text-gray-600">1st Serve</div>
+                            <div className="font-bold text-blue-600">{pFirstServe}%</div>
+                          </div>
+                          <div className="bg-green-50 p-2 rounded">
+                            <div className="text-gray-600">Aces</div>
+                            <div className="font-bold text-green-600">{pStats.aces}</div>
+                          </div>
+                          <div className="bg-red-50 p-2 rounded">
+                            <div className="text-gray-600">DFs</div>
+                            <div className="font-bold text-red-600">{pStats.doubleFaults}</div>
+                          </div>
+                          <div className="bg-green-50 p-2 rounded">
+                            <div className="text-gray-600">Winners</div>
+                            <div className="font-bold text-green-600">{pStats.winners}</div>
+                          </div>
+                          <div className="bg-red-50 p-2 rounded">
+                            <div className="text-gray-600">UE</div>
+                            <div className="font-bold text-red-600">{pStats.unforcedErrors}</div>
+                          </div>
+                          <div className="bg-purple-50 p-2 rounded">
+                            <div className="text-gray-600">Net</div>
+                            <div className="font-bold text-purple-600">{pStats.netPointsWon}/{pStats.netPointsTotal}</div>
+                          </div>
                         </div>
-                        <div className="bg-blue-50 p-2 rounded">
-                          <div className="font-semibold text-gray-700">2nd Serve</div>
-                          <div className="text-lg font-bold text-blue-600">{secondServePercent}%</div>
-                          <div className="text-gray-600">{stats.secondServesIn}/{stats.secondServesTotal}</div>
-                        </div>
-                        <div className="bg-green-50 p-2 rounded">
-                          <div className="font-semibold text-gray-700">Aces</div>
-                          <div className="text-lg font-bold text-green-600">{stats.aces}</div>
-                        </div>
-                        <div className="bg-red-50 p-2 rounded">
-                          <div className="font-semibold text-gray-700">Double Faults</div>
-                          <div className="text-lg font-bold text-red-600">{stats.doubleFaults}</div>
-                        </div>
-                        <div className="bg-green-50 p-2 rounded">
-                          <div className="font-semibold text-gray-700">Winners</div>
-                          <div className="text-lg font-bold text-green-600">{stats.winners}</div>
-                        </div>
-                        <div className="bg-red-50 p-2 rounded">
-                          <div className="font-semibold text-gray-700">Unforced Errors</div>
-                          <div className="text-lg font-bold text-red-600">{stats.unforcedErrors}</div>
+                      </div>
+                      
+                      {/* Opponent Stats */}
+                      <div>
+                        <div className="font-semibold text-gray-700 mb-2">{match.opponent}'s Stats</div>
+                        <div className="grid grid-cols-3 gap-2 text-sm">
+                          <div className="bg-blue-50 p-2 rounded">
+                            <div className="text-gray-600">1st Serve</div>
+                            <div className="font-bold text-blue-600">{oFirstServe}%</div>
+                          </div>
+                          <div className="bg-green-50 p-2 rounded">
+                            <div className="text-gray-600">Aces</div>
+                            <div className="font-bold text-green-600">{oStats.aces}</div>
+                          </div>
+                          <div className="bg-red-50 p-2 rounded">
+                            <div className="text-gray-600">DFs</div>
+                            <div className="font-bold text-red-600">{oStats.doubleFaults}</div>
+                          </div>
                         </div>
                       </div>
                     </div>
