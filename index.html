@@ -71,6 +71,13 @@
         <line x1="12" y1="15" x2="12" y2="3"></line>
       </svg>
     );
+    
+    const Undo = ({ size = 20 }) => (
+      <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <path d="M3 7v6h6"></path>
+        <path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"></path>
+      </svg>
+    );
 
     function TennisMatchTracker() {
       const [matches, setMatches] = useState([]);
@@ -78,6 +85,10 @@
       const [view, setView] = useState('home');
       const [opponentName, setOpponentName] = useState('');
       const [playerName, setPlayerName] = useState('');
+      const [matchHistory, setMatchHistory] = useState([]); // For undo functionality
+      const [serveState, setServeState] = useState('first'); // 'first' or 'second'
+      const [showTiebreakServerModal, setShowTiebreakServerModal] = useState(false);
+      const [pendingTiebreakMatch, setPendingTiebreakMatch] = useState(null);
       
       // Match format settings
       const [matchFormat, setMatchFormat] = useState({
@@ -150,6 +161,8 @@
           }
         };
         setCurrentMatch(match);
+        setMatchHistory([]);
+        setServeState('first');
         setOpponentName('');
         setPlayerName('');
         setView('track');
@@ -232,11 +245,9 @@
           match.serving = match.serving === 'player' ? 'opponent' : 'player';
         }
         
-        // Check for tiebreak
+        // Check for tiebreak - mark as pending, will be confirmed with server selection
         if (shouldStartTiebreak(match)) {
-          match.isTiebreak = true;
-          match.tiebreakPointsPlayed = 0;
-          // Server stays the same for first point of tiebreak
+          match.pendingTiebreak = true;
           return match;
         }
         
@@ -335,9 +346,13 @@
         return match;
       };
 
-      const pointWon = (winner, statType = null) => {
+      const pointWon = (winner, statType = null, isUnforcedError = false) => {
         setCurrentMatch(prev => {
           if (!prev || prev.matchComplete) return prev;
+          
+          // Save current state for undo
+          setMatchHistory(h => [...h, { match: JSON.parse(JSON.stringify(prev)), serveState }]);
+          
           const updated = JSON.parse(JSON.stringify(prev));
           
           // Track stat for the appropriate player
@@ -345,13 +360,61 @@
             updated.stats[winner][statType]++;
           }
           
-          return pointWonDirect(updated, winner);
+          // Track unforced error for the loser
+          if (isUnforcedError) {
+            const loser = winner === 'player' ? 'opponent' : 'player';
+            updated.stats[loser].unforcedErrors++;
+          }
+          
+          const result = pointWonDirect(updated, winner);
+          
+          // Reset serve state after point
+          setServeState('first');
+          
+          // Check if tiebreak needs to be started (show modal)
+          if (result.pendingTiebreak) {
+            setPendingTiebreakMatch(result);
+            setShowTiebreakServerModal(true);
+            return prev; // Don't update yet, wait for server selection
+          }
+          
+          return result;
         });
+      };
+      
+      const startTiebreakWithServer = (server) => {
+        if (!pendingTiebreakMatch) return;
+        
+        const match = JSON.parse(JSON.stringify(pendingTiebreakMatch));
+        match.pendingTiebreak = false;
+        match.isTiebreak = true;
+        match.tiebreakPointsPlayed = 0;
+        match.serving = server;
+        
+        setCurrentMatch(match);
+        setPendingTiebreakMatch(null);
+        setShowTiebreakServerModal(false);
+        setServeState('first');
+      };
+      
+      const undoLastAction = () => {
+        if (matchHistory.length === 0) return;
+        
+        const lastState = matchHistory[matchHistory.length - 1];
+        setCurrentMatch(lastState.match);
+        setServeState(lastState.serveState);
+        setMatchHistory(h => h.slice(0, -1));
       };
 
       const updateServeStats = (stat) => {
         setCurrentMatch(prev => {
           if (!prev || prev.matchComplete) return prev;
+          
+          // Save current state for undo (only for point-ending actions)
+          if (stat === 'doubleFault' || stat === 'ace') {
+            setMatchHistory(h => [...h, { match: JSON.parse(JSON.stringify(prev)), serveState }]);
+          }
+          
           const updated = JSON.parse(JSON.stringify(prev));
           const server = getCurrentServer();
           const stats = updated.stats[server];
@@ -359,22 +422,43 @@
           if (stat === 'firstServeIn') {
             stats.firstServesIn++;
             stats.firstServesTotal++;
+            setServeState('rally'); // Serve is in play
           } else if (stat === 'firstServeMiss') {
             stats.firstServesTotal++;
             stats.secondServesTotal++;
+            setServeState('second'); // Now on second serve
           } else if (stat === 'secondServeIn') {
             stats.secondServesIn++;
+            setServeState('rally'); // Serve is in play
           } else if (stat === 'doubleFault') {
             stats.doubleFaults++;
+            setServeState('first'); // Reset for next point
             // Point goes to receiver
             const receiver = server === 'player' ? 'opponent' : 'player';
-            return pointWonDirect(updated, receiver);
+            const result = pointWonDirect(updated, receiver);
+            
+            // Check for pending tiebreak
+            if (result.pendingTiebreak) {
+              setPendingTiebreakMatch(result);
+              setShowTiebreakServerModal(true);
+              return prev;
+            }
+            return result;
           } else if (stat === 'ace') {
             stats.aces++;
             stats.firstServesIn++;
             stats.firstServesTotal++;
+            setServeState('first'); // Reset for next point
             // Point goes to server
-            return pointWonDirect(updated, server);
+            const result = pointWonDirect(updated, server);
+            
+            // Check for pending tiebreak
+            if (result.pendingTiebreak) {
+              setPendingTiebreakMatch(result);
+              setShowTiebreakServerModal(true);
+              return prev;
+            }
+            return result;
           }
           return updated;
         });
@@ -505,7 +589,8 @@
           [],
           ['Point Statistics'],
           ['Winners', oStats.winners],
-          ['Forced Errors (by opponent)', oStats.forcedErrors],
+          ['Forced Errors (by player)', oStats.forcedErrors],
+          ['Unforced Errors', oStats.unforcedErrors],
         ];
         
         const opponentSheet = XLSX.utils.aoa_to_sheet(opponentStatsData);
@@ -528,7 +613,8 @@
           ['Aces', pStats.aces, oStats.aces],
           ['Double Faults', pStats.doubleFaults, oStats.doubleFaults],
           ['Winners', pStats.winners, oStats.winners],
-          ['Unforced Errors', pStats.unforcedErrors, oStats.unforcedErrors || 0],
+          ['Forced Errors', pStats.forcedErrors, oStats.forcedErrors],
+          ['Unforced Errors', pStats.unforcedErrors, oStats.unforcedErrors],
         ];
         
         const comparisonSheet = XLSX.utils.aoa_to_sheet(comparisonData);
@@ -788,15 +874,62 @@
               {/* Serve Stats - shows for current server */}
               {!currentMatch.matchComplete && (
                 <div className="bg-white rounded-lg shadow-lg p-4 mb-4">
-                  <h3 className="font-bold text-gray-700 mb-3 text-lg">{currentServerName}'s Serve</h3>
+                  <div className="flex justify-between items-center mb-3">
+                    <h3 className="font-bold text-gray-700 text-lg">{currentServerName}'s Serve</h3>
+                    <div className="text-sm text-gray-500">
+                      {serveState === 'first' && '1st serve'}
+                      {serveState === 'second' && '2nd serve'}
+                      {serveState === 'rally' && 'Rally in play'}
+                    </div>
+                  </div>
                   <div className="grid grid-cols-2 gap-2 mb-3">
-                    <button onClick={() => updateServeStats('ace')} className="bg-green-500 text-white py-4 rounded-lg font-semibold text-lg hover:bg-green-600">Ace</button>
-                    <button onClick={() => updateServeStats('doubleFault')} className="bg-red-500 text-white py-4 rounded-lg font-semibold text-lg hover:bg-red-600">Double Fault</button>
+                    <button 
+                      onClick={() => updateServeStats('ace')} 
+                      disabled={serveState === 'rally'}
+                      className={`py-4 rounded-lg font-semibold text-lg ${
+                        serveState === 'rally' 
+                          ? 'bg-gray-300 text-gray-500 cursor-not-allowed' 
+                          : 'bg-green-500 text-white hover:bg-green-600'
+                      }`}
+                    >Ace</button>
+                    <button 
+                      onClick={() => updateServeStats('doubleFault')} 
+                      disabled={serveState !== 'second'}
+                      className={`py-4 rounded-lg font-semibold text-lg ${
+                        serveState !== 'second' 
+                          ? 'bg-gray-300 text-gray-500 cursor-not-allowed' 
+                          : 'bg-red-500 text-white hover:bg-red-600'
+                      }`}
+                    >Double Fault</button>
                   </div>
                   <div className="grid grid-cols-2 gap-2">
-                    <button onClick={() => updateServeStats('firstServeIn')} className="bg-blue-500 text-white py-3 rounded-lg font-medium hover:bg-blue-600">1st Serve In</button>
-                    <button onClick={() => updateServeStats('firstServeMiss')} className="bg-orange-500 text-white py-3 rounded-lg font-medium hover:bg-orange-600">1st Serve Miss</button>
-                    <button onClick={() => updateServeStats('secondServeIn')} className="bg-blue-400 text-white py-3 rounded-lg font-medium hover:bg-blue-500 col-span-2">2nd Serve In</button>
+                    <button 
+                      onClick={() => updateServeStats('firstServeIn')} 
+                      disabled={serveState !== 'first'}
+                      className={`py-3 rounded-lg font-medium ${
+                        serveState !== 'first' 
+                          ? 'bg-gray-300 text-gray-500 cursor-not-allowed' 
+                          : 'bg-blue-500 text-white hover:bg-blue-600'
+                      }`}
+                    >1st Serve In</button>
+                    <button 
+                      onClick={() => updateServeStats('firstServeMiss')} 
+                      disabled={serveState !== 'first'}
+                      className={`py-3 rounded-lg font-medium ${
+                        serveState !== 'first' 
+                          ? 'bg-gray-300 text-gray-500 cursor-not-allowed' 
+                          : 'bg-orange-500 text-white hover:bg-orange-600'
+                      }`}
+                    >1st Serve Miss</button>
+                    <button 
+                      onClick={() => updateServeStats('secondServeIn')} 
+                      disabled={serveState !== 'second'}
+                      className={`py-3 rounded-lg font-medium col-span-2 ${
+                        serveState !== 'second' 
+                          ? 'bg-gray-300 text-gray-500 cursor-not-allowed' 
+                          : 'bg-blue-400 text-white hover:bg-blue-500'
+                      }`}
+                    >2nd Serve In</button>
                   </div>
                 </div>
               )}
@@ -804,22 +937,55 @@
               {!currentMatch.matchComplete && (
                 <div className="bg-white rounded-lg shadow-lg p-4 mb-4">
                   <h3 className="font-bold text-gray-700 mb-3 text-lg">Point Outcome</h3>
+                  {serveState !== 'rally' && (
+                    <div className="text-sm text-amber-600 mb-2 text-center">
+                      Record serve result first, or tap a point outcome to skip serve tracking
+                    </div>
+                  )}
                   <div className="grid grid-cols-2 gap-2">
-                    <button onClick={() => pointWon('player', 'winners')} className="bg-green-500 text-white py-4 rounded-lg font-semibold hover:bg-green-600">
+                    <button 
+                      onClick={() => pointWon('player', 'winners')} 
+                      className="bg-green-500 text-white py-4 rounded-lg font-semibold hover:bg-green-600"
+                    >
                       {currentMatch.playerName} Winner
                       <div className="text-sm font-normal">({playerStats.winners})</div>
                     </button>
-                    <button onClick={() => pointWon('player', 'forcedErrors')} className="bg-blue-500 text-white py-4 rounded-lg font-semibold hover:bg-blue-600">
-                      {currentMatch.opponent} Error
-                      <div className="text-sm font-normal">(forced: {playerStats.forcedErrors})</div>
+                    <button 
+                      onClick={() => pointWon('player', 'forcedErrors')} 
+                      className="bg-blue-500 text-white py-4 rounded-lg font-semibold hover:bg-blue-600"
+                    >
+                      {currentMatch.opponent} Forced Err
+                      <div className="text-sm font-normal">({opponentStats.forcedErrors})</div>
                     </button>
-                    <button onClick={() => pointWon('opponent', 'winners')} className="bg-orange-500 text-white py-4 rounded-lg font-semibold hover:bg-orange-600">
+                    <button 
+                      onClick={() => pointWon('opponent', 'winners')} 
+                      className="bg-orange-500 text-white py-4 rounded-lg font-semibold hover:bg-orange-600"
+                    >
                       {currentMatch.opponent} Winner
                       <div className="text-sm font-normal">({opponentStats.winners})</div>
                     </button>
-                    <button onClick={() => pointWon('opponent', 'forcedErrors')} className="bg-red-500 text-white py-4 rounded-lg font-semibold hover:bg-red-600">
-                      {currentMatch.playerName} Error
-                      <div className="text-sm font-normal">(UE: {playerStats.unforcedErrors})</div>
+                    <button 
+                      onClick={() => pointWon('opponent', null, true)} 
+                      className="bg-red-500 text-white py-4 rounded-lg font-semibold hover:bg-red-600"
+                    >
+                      {currentMatch.playerName} UE
+                      <div className="text-sm font-normal">({playerStats.unforcedErrors})</div>
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 mt-2">
+                    <button 
+                      onClick={() => pointWon('player', null, true)} 
+                      className="bg-teal-500 text-white py-3 rounded-lg font-semibold hover:bg-teal-600"
+                    >
+                      {currentMatch.opponent} UE
+                      <div className="text-sm font-normal">({opponentStats.unforcedErrors})</div>
+                    </button>
+                    <button 
+                      onClick={() => pointWon('opponent', 'forcedErrors')} 
+                      className="bg-indigo-500 text-white py-3 rounded-lg font-semibold hover:bg-indigo-600"
+                    >
+                      {currentMatch.playerName} Forced Err
+                      <div className="text-sm font-normal">({playerStats.forcedErrors})</div>
                     </button>
                   </div>
                 </div>
@@ -839,14 +1005,50 @@
                 </div>
               )}
 
-              <div className="grid grid-cols-2 gap-2">
-                <button onClick={() => { if (confirm('Abandon match?')) { setCurrentMatch(null); setView('home'); }}} className="bg-gray-500 text-white py-3 rounded-lg font-semibold hover:bg-gray-600">
+              {/* Undo and Action Buttons */}
+              <div className="grid grid-cols-3 gap-2">
+                <button 
+                  onClick={undoLastAction} 
+                  disabled={matchHistory.length === 0}
+                  className={`py-3 rounded-lg font-semibold flex items-center justify-center gap-2 ${
+                    matchHistory.length === 0 
+                      ? 'bg-gray-300 text-gray-500 cursor-not-allowed' 
+                      : 'bg-amber-500 text-white hover:bg-amber-600'
+                  }`}
+                >
+                  <Undo />Undo
+                </button>
+                <button onClick={() => { if (confirm('Abandon match?')) { setCurrentMatch(null); setMatchHistory([]); setView('home'); }}} className="bg-gray-500 text-white py-3 rounded-lg font-semibold hover:bg-gray-600">
                   {currentMatch.matchComplete ? 'Discard' : 'Cancel'}
                 </button>
                 <button onClick={saveMatch} className="bg-green-600 text-white py-3 rounded-lg font-semibold hover:bg-green-700 flex items-center justify-center gap-2">
-                  <Save />Save Match
+                  <Save />Save
                 </button>
               </div>
+              
+              {/* Tiebreak Server Selection Modal */}
+              {showTiebreakServerModal && pendingTiebreakMatch && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                  <div className="bg-white rounded-lg shadow-xl p-6 max-w-sm w-full">
+                    <h3 className="text-xl font-bold text-gray-800 mb-2 text-center">Tiebreak!</h3>
+                    <p className="text-gray-600 mb-4 text-center">Who serves first in the tiebreak?</p>
+                    <div className="grid grid-cols-1 gap-3">
+                      <button
+                        onClick={() => startTiebreakWithServer('player')}
+                        className="bg-blue-600 text-white py-4 rounded-lg font-semibold text-lg hover:bg-blue-700"
+                      >
+                        {pendingTiebreakMatch.playerName}
+                      </button>
+                      <button
+                        onClick={() => startTiebreakWithServer('opponent')}
+                        className="bg-green-600 text-white py-4 rounded-lg font-semibold text-lg hover:bg-green-700"
+                      >
+                        {pendingTiebreakMatch.opponent}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         );
@@ -934,6 +1136,18 @@
                           <div className="bg-red-50 p-2 rounded">
                             <div className="text-gray-600">DFs</div>
                             <div className="font-bold text-red-600">{oStats.doubleFaults}</div>
+                          </div>
+                          <div className="bg-green-50 p-2 rounded">
+                            <div className="text-gray-600">Winners</div>
+                            <div className="font-bold text-green-600">{oStats.winners}</div>
+                          </div>
+                          <div className="bg-red-50 p-2 rounded">
+                            <div className="text-gray-600">UE</div>
+                            <div className="font-bold text-red-600">{oStats.unforcedErrors}</div>
+                          </div>
+                          <div className="bg-blue-50 p-2 rounded">
+                            <div className="text-gray-600">Forced</div>
+                            <div className="font-bold text-blue-600">{oStats.forcedErrors}</div>
                           </div>
                         </div>
                       </div>
